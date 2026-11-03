@@ -97,6 +97,9 @@ public class MainActivity extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         webView.addJavascriptInterface(new LedgerBridge(), "NatureCareAndroid");
+        // v1.2.0: independent, public Android-JavaScript bridge dedicated to PDF files.
+        // The original bridge remains intact for Firebase push and CSV export.
+        webView.addJavascriptInterface(new PdfDownloadBridge(this), "NatureCarePdf");
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
@@ -193,6 +196,12 @@ public class MainActivity extends Activity {
         if (scheme == null || !(scheme.equals("https") || scheme.equals("http") || scheme.equals("mailto") || scheme.equals("tel"))) return;
         try {startActivity(new Intent(Intent.ACTION_VIEW, uri));}
         catch (ActivityNotFoundException e) {Toast.makeText(this,"تعذر فتح الرابط",Toast.LENGTH_SHORT).show();}
+    }
+
+    // Invoked only from the separate annotated PDF bridge. The existing savePdf
+    // implementation performs filename sanitization, PDF validation and MediaStore I/O.
+    void savePdfFromDedicatedBridge(String fileName, String pdfBase64) {
+        new LedgerBridge().savePdf(fileName, pdfBase64);
     }
 
     private final class LedgerBridge {
