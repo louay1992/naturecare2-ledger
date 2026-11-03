@@ -12,11 +12,15 @@ import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -41,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final String SITE_HOST = "acc-naturecare.netlify.app";
     private static final int SAVE_CSV_REQUEST = 1813;
+    private static final int SAVE_PDF_REQUEST = 1815;
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1814;
     private WebView webView;
     private LinearLayout overlay;
@@ -48,6 +53,7 @@ public class MainActivity extends Activity {
     private ProgressBar progress;
     private Button retry;
     private String pendingCsv;
+    private String pendingPdf;
     private boolean pageFailed;
 
     private static final String WEB_INTEGRATION = "(function(){" +
@@ -206,6 +212,64 @@ public class MainActivity extends Activity {
                 printManager.print("NatureCare Ledger", webView.createPrintDocumentAdapter("NatureCare Ledger"),null);
             });
         }
+        // v8.5: Save a real application/pdf directly, never through the CSV blob handler.
+        @JavascriptInterface public void savePdf(String fileName, String pdfBase64) {
+            if (pdfBase64 == null || pdfBase64.isEmpty() || pdfBase64.length() > 32000000) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                    "تعذر حفظ PDF: الملف غير صالح أو كبير جداً", Toast.LENGTH_LONG).show());
+                return;
+            }
+            String name = (fileName == null ? "NatureCare_Statement.pdf" : fileName)
+                    .replaceAll("[\\\\/:*?\"<>|]", "_");
+            if (!name.toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) name += ".pdf";
+            final String safeName = name;
+            if (Build.VERSION.SDK_INT >= 29) {
+                new Thread(() -> {
+                    Uri saved = null;
+                    try {
+                        byte[] bytes = Base64.decode(pdfBase64, Base64.DEFAULT);
+                        if (bytes.length < 5 || bytes[0] != '%' || bytes[1] != 'P'
+                                || bytes[2] != 'D' || bytes[3] != 'F' || bytes[4] != '-') {
+                            throw new IllegalArgumentException("Not a valid PDF");
+                        }
+                        ContentValues v = new ContentValues();
+                        v.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName);
+                        v.put(MediaStore.MediaColumns.MIME_TYPE, "application/pdf");
+                        v.put(MediaStore.MediaColumns.RELATIVE_PATH,
+                                Environment.DIRECTORY_DOWNLOADS + "/NatureCare Ledger");
+                        v.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                        saved = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                        if (saved == null) throw new IllegalStateException("Cannot create download");
+                        try (OutputStream out = getContentResolver().openOutputStream(saved)) {
+                            if (out == null) throw new IllegalStateException("Cannot open output");
+                            out.write(bytes);
+                        }
+                        ContentValues ready = new ContentValues();
+                        ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                        getContentResolver().update(saved, ready, null, null);
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "تم تنزيل PDF في Downloads/NatureCare Ledger", Toast.LENGTH_LONG).show());
+                    } catch (Exception ex) {
+                        if (saved != null) try {getContentResolver().delete(saved, null, null);} catch(Exception ignored) {}
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                            "تعذر حفظ PDF: " + ex.getMessage(), Toast.LENGTH_LONG).show());
+                    }
+                }).start();
+            } else {
+                runOnUiThread(() -> {
+                    pendingPdf = pdfBase64;
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("application/pdf");
+                    intent.putExtra(Intent.EXTRA_TITLE, safeName);
+                    try { startActivityForResult(intent, SAVE_PDF_REQUEST); }
+                    catch (ActivityNotFoundException ex) {
+                        pendingPdf = null;
+                        Toast.makeText(MainActivity.this, "تعذر فتح حفظ PDF", Toast.LENGTH_LONG).show();
+                    }
+                });
+            }
+        }
         @JavascriptInterface public void saveCsv(String fileName, String csv) {
             runOnUiThread(() -> {
                 pendingCsv = csv;
@@ -222,6 +286,19 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode,resultCode,data);
+        if (requestCode == SAVE_PDF_REQUEST) {
+            String encoded = pendingPdf;
+            pendingPdf = null;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null || encoded == null) return;
+            try (OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+                if (output == null) throw new IllegalStateException("No output stream");
+                output.write(Base64.decode(encoded, Base64.DEFAULT));
+                Toast.makeText(this, "تم حفظ كشف الحساب PDF", Toast.LENGTH_LONG).show();
+            } catch (Exception ex) {
+                Toast.makeText(this, "تعذر حفظ PDF: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
         if (requestCode != SAVE_CSV_REQUEST) return;
         if (resultCode != RESULT_OK || data == null || data.getData()==null || pendingCsv == null) {
             pendingCsv = null;
