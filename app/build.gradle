@@ -17,13 +17,13 @@ android {
             dimension 'role'
             applicationId 'com.naturecare.ledger.owner'
             resValue 'string', 'app_name', 'NatureCare | Louay'
-            buildConfigField 'String', 'START_URL', '"https://relaxed-truffle-b202b1.netlify.app/owner.html"'
+            buildConfigField 'String', 'START_URL', '"https://acc-naturecare.netlify.app/owner.html"'
         }
         supplier {
             dimension 'role'
             applicationId 'com.naturecare.ledger.supplier'
             resValue 'string', 'app_name', 'NatureCare | Supplier'
-            buildConfigField 'String', 'START_URL', '"https://relaxed-truffle-b202b1.netlify.app/supplier.html"'
+            buildConfigField 'String', 'START_URL', '"https://acc-naturecare.netlify.app/supplier.html"'
         }
     }
     buildFeatures { buildConfig true }
