@@ -1,6 +1,6 @@
 NatureCare Ledger - Android
-Admin: https://relaxed-truffle-b202b1.netlify.app/owner.html
-Supplier: https://relaxed-truffle-b202b1.netlify.app/supplier.html
+Admin: https://acc-naturecare.netlify.app/owner.html
+Supplier: https://acc-naturecare.netlify.app/supplier.html
 Source: native Android shell + WebView; same Supabase backend; currency via SP Today Edge Function.
 Build (Java 17, Gradle 8.7, Android SDK 35):
   gradle :app:assembleOwnerDebug :app:assembleSupplierDebug
