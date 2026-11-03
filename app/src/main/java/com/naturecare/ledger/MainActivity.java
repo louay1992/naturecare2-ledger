@@ -1,6 +1,11 @@
 package com.naturecare.ledger;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import com.google.firebase.messaging.FirebaseMessaging;
+import org.json.JSONObject;
 import android.app.Activity;
 import android.print.PrintManager;
 import android.content.ActivityNotFoundException;
@@ -34,8 +39,9 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
-private static final String SITE_HOST = "acc-naturecare.netlify.app";
+    private static final String SITE_HOST = "acc-naturecare.netlify.app";
     private static final int SAVE_CSV_REQUEST = 1813;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1814;
     private WebView webView;
     private LinearLayout overlay;
     private TextView message;
@@ -157,7 +163,8 @@ private static final String SITE_HOST = "acc-naturecare.netlify.app";
         screen.addView(overlay, new FrameLayout.LayoutParams(-1,-1));
         setContentView(screen);
         if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
-            webView.loadUrl(BuildConfig.START_URL);
+            webView.loadUrl(BuildConfig.START_URL +
+                ("approvals".equals(getIntent().getStringExtra("nc_target")) ? "#approvals" : ""));
         }
     }
 
@@ -183,6 +190,10 @@ private static final String SITE_HOST = "acc-naturecare.netlify.app";
     }
 
     private final class LedgerBridge {
+        @JavascriptInterface public void requestPushToken() {
+            // Called only after the web app has confirmed a Supabase session.
+            runOnUiThread(() -> askNotificationPermissionThenFetch());
+        }
         @JavascriptInterface public void copyText(String text) {
             runOnUiThread(() -> {
                 ClipboardManager cb = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
@@ -223,6 +234,37 @@ private static final String SITE_HOST = "acc-naturecare.netlify.app";
         } catch(Exception ex) {
             Toast.makeText(this,"تعذر حفظ الملف: " + ex.getMessage(),Toast.LENGTH_LONG).show();
         } finally {pendingCsv = null;}
+    }
+    private void askNotificationPermissionThenFetch() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+            return;
+        }
+        fetchPushToken();
+    }
+    private void fetchPushToken() {
+        FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+            if (!task.isSuccessful() || webView == null) return;
+            String token = task.getResult();
+            if (token == null || token.isEmpty()) return;
+            // JSON-encode the token: never splice untrusted text directly into JavaScript.
+            String script = "window.dispatchEvent(new CustomEvent('naturecare:push-token',{detail:{token:"
+                    + JSONObject.quote(token) + "}}));";
+            webView.post(() -> { if (webView != null) webView.evaluateJavascript(script, null); });
+        });
+    }
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST && grantResults.length > 0 &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED) fetchPushToken();
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (webView != null && "approvals".equals(intent.getStringExtra("nc_target"))) {
+            webView.evaluateJavascript("window.dispatchEvent(new Event('naturecare:open-approvals'));", null);
+        }
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         webView.saveState(state);
