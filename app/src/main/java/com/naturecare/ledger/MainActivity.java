@@ -1,0 +1,244 @@
+package com.naturecare.ledger;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.app.PrintManager;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+
+public class MainActivity extends Activity {
+    private static final String SITE_HOST = "relaxed-truffle-b202b1.netlify.app";
+    private static final int SAVE_CSV_REQUEST = 1813;
+    private WebView webView;
+    private LinearLayout overlay;
+    private TextView message;
+    private ProgressBar progress;
+    private Button retry;
+    private String pendingCsv;
+    private boolean pageFailed;
+
+    private static final String WEB_INTEGRATION = "(function(){" +
+        "if(window.__naturecareAndroidReady)return;window.__naturecareAndroidReady=true;" +
+        "window.print=function(){NatureCareAndroid.printPage();};" +
+        "try{if(!navigator.clipboard||!navigator.clipboard.writeText){" +
+        "Object.defineProperty(navigator,'clipboard',{configurable:true,value:{" +
+        "writeText:function(t){NatureCareAndroid.copyText(String(t));return Promise.resolve();}" +
+        "}});}}catch(e){}" +
+        "document.addEventListener('click',function(e){" +
+        "var a=e.target&&e.target.closest&&e.target.closest('a[download]');" +
+        "if(!a||!a.href||a.href.indexOf('blob:')!==0)return;" +
+        "e.preventDefault();e.stopPropagation();" +
+        "fetch(a.href).then(function(r){return r.text();}).then(function(t){" +
+        "NatureCareAndroid.saveCsv(a.getAttribute('download')||'NatureCare_Ledger.csv',t);" +
+        "}).catch(function(err){console.error('CSV save failed',err);});" +
+        "},true);" +
+        "})();";
+
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    @Override public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        getWindow().setStatusBarColor(Color.rgb(13,80,59));
+        getWindow().setNavigationBarColor(Color.rgb(243,248,245));
+
+        FrameLayout screen = new FrameLayout(this);
+        screen.setBackgroundColor(Color.rgb(243,248,245));
+        webView = new WebView(this);
+        webView.setBackgroundColor(Color.rgb(243,248,245));
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setAllowFileAccess(false);
+        s.setAllowContentAccess(false);
+        s.setJavaScriptCanOpenWindowsAutomatically(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        s.setSafeBrowsingEnabled(true);
+        s.setSupportZoom(false);
+        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(true);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        webView.addJavascriptInterface(new LedgerBridge(), "NatureCareAndroid");
+        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+                super.onPageStarted(view, url, icon);
+                pageFailed = false;
+                showLoading();
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                if ("https".equalsIgnoreCase(uri.getScheme()) && SITE_HOST.equalsIgnoreCase(uri.getHost())) {
+                    return false;
+                }
+                openOutside(uri);
+                return true;
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (!pageFailed) {
+                    overlay.setVisibility(View.GONE);
+                    view.evaluateJavascript(WEB_INTEGRATION, null);
+                }
+            }
+            @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request.isForMainFrame()) {
+                    pageFailed = true;
+                    showError("تعذر الاتصال بالموقع. تأكد من الإنترنت وحاول مجدداً.");
+                }
+            }
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                    android.webkit.WebResourceResponse response) {
+                if (request.isForMainFrame() && response.getStatusCode() >= 400) {
+                    pageFailed = true;
+                    showError("صفحة التطبيق غير متاحة حالياً (" + response.getStatusCode() + ").");
+                }
+            }
+        });
+        screen.addView(webView, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        overlay = new LinearLayout(this);
+        overlay.setOrientation(LinearLayout.VERTICAL);
+        overlay.setGravity(Gravity.CENTER);
+        overlay.setPadding(dp(24), dp(24), dp(24), dp(24));
+        overlay.setBackgroundColor(Color.rgb(243,248,245));
+        TextView title = new TextView(this);
+        title.setText("🌿 NatureCare Ledger");
+        title.setTextSize(24);
+        title.setTextColor(Color.rgb(13,80,59));
+        title.setTypeface(null, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        overlay.addView(title);
+        progress = new ProgressBar(this);
+        LinearLayout.LayoutParams progressLp = new LinearLayout.LayoutParams(dp(42),dp(42));
+        progressLp.topMargin = dp(22);
+        overlay.addView(progress, progressLp);
+        message = new TextView(this);
+        message.setText("جارٍ الاتصال بدفتر الحسابات…");
+        message.setTextColor(Color.rgb(49,75,62));
+        message.setTextSize(16);
+        message.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(-1,-2);
+        msgLp.topMargin = dp(20);
+        overlay.addView(message, msgLp);
+        retry = new Button(this);
+        retry.setText("إعادة المحاولة");
+        retry.setVisibility(View.GONE);
+        retry.setOnClickListener(v -> webView.loadUrl(BuildConfig.START_URL));
+        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(-2,-2);
+        retryLp.topMargin = dp(16);
+        overlay.addView(retry, retryLp);
+        screen.addView(overlay, new FrameLayout.LayoutParams(-1,-1));
+        setContentView(screen);
+        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
+            webView.loadUrl(BuildConfig.START_URL);
+        }
+    }
+
+    private int dp(int n) {return (int)(n * getResources().getDisplayMetrics().density + .5f);}
+    private void showLoading() {
+        overlay.setVisibility(View.VISIBLE);
+        message.setText("جارٍ فتح دفتر الحسابات…");
+        progress.setVisibility(View.VISIBLE);
+        retry.setVisibility(View.GONE);
+    }
+    private void showError(String text) {
+        overlay.setVisibility(View.VISIBLE);
+        message.setText(text);
+        progress.setVisibility(View.GONE);
+        retry.setVisibility(View.VISIBLE);
+    }
+    private void openOutside(Uri uri) {
+        if (uri == null) return;
+        String scheme = uri.getScheme();
+        if (scheme == null || !(scheme.equals("https") || scheme.equals("http") || scheme.equals("mailto") || scheme.equals("tel"))) return;
+        try {startActivity(new Intent(Intent.ACTION_VIEW, uri));}
+        catch (ActivityNotFoundException e) {Toast.makeText(this,"تعذر فتح الرابط",Toast.LENGTH_SHORT).show();}
+    }
+
+    private final class LedgerBridge {
+        @JavascriptInterface public void copyText(String text) {
+            runOnUiThread(() -> {
+                ClipboardManager cb = (ClipboardManager)getSystemService(Context.CLIPBOARD_SERVICE);
+                cb.setPrimaryClip(ClipData.newPlainText("NatureCare", text));
+            });
+        }
+        @JavascriptInterface public void printPage() {
+            runOnUiThread(() -> {
+                PrintManager printManager = (PrintManager)getSystemService(Context.PRINT_SERVICE);
+                printManager.print("NatureCare Ledger", webView.createPrintDocumentAdapter("NatureCare Ledger"),null);
+            });
+        }
+        @JavascriptInterface public void saveCsv(String fileName, String csv) {
+            runOnUiThread(() -> {
+                pendingCsv = csv;
+                String safeName = fileName.replaceAll("[\\\\/:*?\"<>|]", "_");
+                if (!safeName.toLowerCase().endsWith(".csv")) safeName += ".csv";
+                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("text/csv");
+                intent.putExtra(Intent.EXTRA_TITLE, safeName);
+                try {startActivityForResult(intent,SAVE_CSV_REQUEST);}
+                catch (ActivityNotFoundException e) {Toast.makeText(MainActivity.this,"تعذر فتح حفظ الملفات",Toast.LENGTH_LONG).show();}
+            });
+        }
+    }
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        if (requestCode != SAVE_CSV_REQUEST) return;
+        if (resultCode != RESULT_OK || data == null || data.getData()==null || pendingCsv == null) {
+            pendingCsv = null;
+            return;
+        }
+        try(OutputStream output = getContentResolver().openOutputStream(data.getData())) {
+            if (output == null) throw new IllegalStateException("No output stream");
+            output.write(pendingCsv.getBytes(StandardCharsets.UTF_8));
+            Toast.makeText(this,"تم حفظ كشف الحساب",Toast.LENGTH_LONG).show();
+        } catch(Exception ex) {
+            Toast.makeText(this,"تعذر حفظ الملف: " + ex.getMessage(),Toast.LENGTH_LONG).show();
+        } finally {pendingCsv = null;}
+    }
+    @Override protected void onSaveInstanceState(Bundle state) {
+        webView.saveState(state);
+        super.onSaveInstanceState(state);
+    }
+    @Override public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) webView.goBack();
+        else super.onBackPressed();
+    }
+    @Override protected void onDestroy() {
+        if (webView!=null) {
+            webView.removeJavascriptInterface("NatureCareAndroid");
+            webView.stopLoading();
+            webView.destroy();
+            webView=null;
+        }
+        super.onDestroy();
+    }
+}
