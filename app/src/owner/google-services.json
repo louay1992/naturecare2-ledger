@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "688378510819",
+    "project_id": "naturecare-a7173",
+    "storage_bucket": "naturecare-a7173.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:688378510819:android:d028c6df478e6077ddb4d6",
+        "android_client_info": {
+          "package_name": "com.naturecare.ledger.owner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBa4mN5kVkA3cjgIgUuKSEri362VRdAj0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
