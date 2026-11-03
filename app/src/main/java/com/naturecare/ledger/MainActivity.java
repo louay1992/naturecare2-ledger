@@ -34,7 +34,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
-    private static final String SITE_HOST = "relaxed-truffle-b202b1.netlify.app";
+private static final String SITE_HOST = "acc-naturecare.netlify.app";
     private static final int SAVE_CSV_REQUEST = 1813;
     private WebView webView;
     private LinearLayout overlay;
